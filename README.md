@@ -1,5 +1,6 @@
 <div align="center">
-
+  <img src="assets/icon.png" alt="Judge LLM" width="200"/>
+  
   # Copilot LLM Proxy
 
   A lightweight VS Code extension that bridges GitHub Copilot's Language Model API to an OpenAI-compatible REST API. Zero runtime dependencies.
