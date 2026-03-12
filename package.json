@@ -1,0 +1,90 @@
+{
+  "name": "copilot-llm-proxy",
+  "displayName": "Copilot LLM Proxy",
+  "description": "Lightweight proxy that exposes VS Code Language Model API as an OpenAI-compatible REST API",
+  "version": "1.0.0",
+  "license": "MIT",
+  "publisher": "CopilotProxy",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ProSoftTools/COPILOT-LLM-PROXY"
+  },
+  "bugs": {
+    "url": "https://github.com/ProSoftTools/COPILOT-LLM-PROXY/issues"
+  },
+  "homepage": "https://github.com/ProSoftTools/COPILOT-LLM-PROXY#readme",
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "copilot-llm-proxy.start",
+        "title": "Copilot LLM Proxy: Start Server"
+      },
+      {
+        "command": "copilot-llm-proxy.stop",
+        "title": "Copilot LLM Proxy: Stop Server"
+      },
+      {
+        "command": "copilot-llm-proxy.metrics",
+        "title": "Copilot LLM Proxy: View Metrics"
+      },
+      {
+        "command": "copilot-llm-proxy.configPort",
+        "title": "Copilot LLM Proxy: Configure Port"
+      },
+      {
+        "command": "copilot-llm-proxy.configApiKey",
+        "title": "Copilot LLM Proxy: Configure API Key"
+      },
+      {
+        "command": "copilot-llm-proxy.toggleAutoStart",
+        "title": "Copilot LLM Proxy: Toggle Auto-start"
+      }
+    ],
+    "configuration": {
+      "title": "Copilot LLM Proxy",
+      "properties": {
+        "copilotLlmProxy.port": {
+          "type": "number",
+          "default": 4141,
+          "description": "Port number for the proxy server"
+        },
+        "copilotLlmProxy.autoStart": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically start the proxy server when VS Code launches"
+        },
+        "copilotLlmProxy.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for authenticating requests. If empty, no authentication is required. Clients must send Authorization: Bearer <key>."
+        },
+        "copilotLlmProxy.logLevel": {
+          "type": "string",
+          "default": "INFO",
+          "enum": ["DEBUG", "INFO", "WARN", "ERROR"],
+          "description": "Log level for the output channel"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.93.0",
+    "typescript": "^5.5.0"
+  }
+}
