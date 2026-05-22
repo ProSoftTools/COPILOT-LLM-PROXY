@@ -26,6 +26,9 @@ export interface RequestMetric {
   totalTokens: number;
   hasToolCalls: boolean;
   error?: string;
+  requestMessages?: Array<{ role: string; content: string }>;
+  responseText?: string;
+  toolCallsData?: Array<{ name: string; args: string }>;
 }
 
 interface ModelStats {
@@ -301,6 +304,78 @@ function buildHtml(startDate?: string, endDate?: string): string {
   }
   .clear-btn:hover { background: var(--vscode-button-secondaryHoverBackground); }
   .muted { color: var(--vscode-descriptionForeground); }
+
+  /* Request detail row */
+  .detail-row { display: none; }
+  .detail-row.open { display: table-row; }
+  .detail-cell {
+    padding: 0 !important;
+    border-bottom: 2px solid var(--vscode-focusBorder, #007acc) !important;
+  }
+  .detail-inner {
+    padding: 6px 10px 8px;
+    background: var(--vscode-editor-inactiveSelectionBackground, rgba(128,128,128,0.07));
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  @media (max-width: 700px) { .detail-inner { grid-template-columns: 1fr; } }
+  .detail-section h4 { margin: 0 0 4px; font-size: 0.74em; text-transform: uppercase; letter-spacing: 0.5px; color: var(--vscode-descriptionForeground); }
+  .detail-messages { display: flex; flex-direction: column; gap: 3px; }
+  .msg-bubble {
+    border-radius: 4px; padding: 3px 8px; font-size: 0.78em;
+    word-break: break-word; cursor: pointer;
+    border-left: 3px solid transparent;
+    overflow: hidden;
+  }
+  .msg-bubble .msg-body {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .msg-bubble.expanded .msg-body {
+    white-space: pre-wrap; overflow: visible; text-overflow: unset;
+  }
+  .msg-role {
+    font-size: 0.7em; font-weight: bold; text-transform: uppercase;
+    letter-spacing: 0.4px; color: var(--vscode-descriptionForeground);
+    display: inline; margin-right: 5px;
+  }
+  .msg-user { background: var(--vscode-editor-inactiveSelectionBackground); border-left-color: #3a86ff; }
+  .msg-assistant { background: var(--vscode-editor-inactiveSelectionBackground); border-left-color: #52b788; }
+  .msg-system { background: var(--vscode-editor-inactiveSelectionBackground); border-left-color: #f4a261; }
+  .msg-tool { background: var(--vscode-editor-inactiveSelectionBackground); border-left-color: #9b5de5; }
+  .response-box {
+    font-size: 0.78em; white-space: pre-wrap; word-break: break-word;
+    max-height: 140px; overflow-y: auto;
+    padding: 4px 8px; border-radius: 4px;
+    background: var(--vscode-editor-inactiveSelectionBackground);
+    border-left: 3px solid #52b788;
+  }
+  .tool-call-block {
+    margin-top: 4px; border-radius: 4px; overflow: hidden;
+    border: 1px solid var(--vscode-widget-border);
+  }
+  .tool-call-header {
+    background: #f4a26122; padding: 2px 8px;
+    font-size: 0.75em; font-weight: bold; color: #f4a261;
+    display: flex; align-items: center; gap: 4px;
+    cursor: pointer; user-select: none;
+  }
+  .tool-call-args {
+    font-size: 0.75em; white-space: pre-wrap; word-break: break-word;
+    max-height: 100px; overflow-y: auto;
+    padding: 4px 8px;
+    background: var(--vscode-editor-inactiveSelectionBackground);
+    font-family: var(--vscode-editor-font-family, monospace);
+  }
+  .tool-call-args.collapsed { display: none; }
+  .view-btn {
+    padding: 1px 8px; border-radius: 4px; font-size: 0.78em; cursor: pointer;
+    background: transparent; color: var(--vscode-foreground);
+    border: 1px solid var(--vscode-widget-border);
+    white-space: nowrap;
+  }
+  .view-btn:hover { background: var(--vscode-list-hoverBackground); }
+  .view-btn.active { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: var(--vscode-button-background); }
 </style>
 </head>
 <body>
@@ -371,8 +446,8 @@ function buildHtml(startDate?: string, endDate?: string): string {
   <h2>Requests ${requests.length > 0 ? `<span class="muted" style="font-weight:normal;font-size:0.85em">(last ${Math.min(requests.length, 100)})</span>` : ''}</h2>
   ${requests.length === 0 ? '<div class="empty">No requests in this range.</div>' : `
   <table>
-    <tr><th>Time</th><th>Model</th><th>Type</th><th>Tokens</th><th>Latency</th><th>Status</th></tr>
-    ${requests.map(r => `
+    <tr><th>Time</th><th>Model</th><th>Type</th><th>Tokens</th><th>Latency</th><th>Status</th><th></th></tr>
+    ${requests.map((r, i) => `
     <tr>
       <td>${formatDateTime(r.timestamp)}</td>
       <td><code>${escHtml(shortModel(r.model))}</code></td>
@@ -383,6 +458,36 @@ function buildHtml(startDate?: string, endDate?: string): string {
       <td>${formatNumber(r.totalTokens)}</td>
       <td>${r.durationMs.toFixed(0)} ms</td>
       <td>${r.error ? `<span class="tag tag-error">${escHtml(r.error.substring(0, 40))}</span>` : '<span class="muted">OK</span>'}</td>
+      <td>${(r.requestMessages || r.responseText) ? `<button class="view-btn" data-idx="${i}">View</button>` : ''}</td>
+    </tr>
+    <tr class="detail-row" id="detail-${i}">
+      <td class="detail-cell" colspan="7">
+        <div class="detail-inner">
+          <div class="detail-section">
+            <h4>Request — ${r.requestMessages ? r.requestMessages.length + ' msg' : 'n/a'}</h4>
+            <div class="detail-messages">
+              ${(r.requestMessages || []).map(m => `
+              <div class="msg-bubble msg-${escHtml(m.role)}">
+                <span class="msg-role">${escHtml(m.role)}</span><span class="msg-body">${escHtml(m.content)}</span>
+              </div>`).join('')}
+              ${!r.requestMessages ? '<span class="muted">Not captured</span>' : ''}
+            </div>
+          </div>
+          <div class="detail-section">
+            <h4>Response${r.toolCallsData && r.toolCallsData.length > 0 ? ` &nbsp;<span class="tag tag-tools">${r.toolCallsData.length} tool${r.toolCallsData.length !== 1 ? 's' : ''}</span>` : ''}</h4>
+            ${r.responseText
+              ? `<div class="response-box">${escHtml(r.responseText)}</div>`
+              : r.error
+                ? `<div class="response-box" style="border-left-color:#e5383b;color:#e5383b">${escHtml(r.error)}</div>`
+                : (!r.toolCallsData || r.toolCallsData.length === 0 ? '<span class="muted">Not captured</span>' : '')}
+            ${(r.toolCallsData || []).map(tc => `
+            <div class="tool-call-block">
+              <div class="tool-call-header"><span class="tc-arrow">▶</span> ${escHtml(tc.name)}</div>
+              <div class="tool-call-args collapsed">${escHtml(formatJson(tc.args))}</div>
+            </div>`).join('')}
+          </div>
+        </div>
+      </td>
     </tr>`).join('')}
   </table>`}
 
@@ -425,6 +530,31 @@ function buildHtml(startDate?: string, endDate?: string): string {
       d.setDate(d.getDate() + days);
       return d.toISOString().split('T')[0];
     }
+
+    // Expand/collapse detail rows
+    document.querySelectorAll('.view-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = btn.dataset.idx;
+        const row = document.getElementById('detail-' + idx);
+        const isOpen = row.classList.toggle('open');
+        btn.classList.toggle('active', isOpen);
+        btn.textContent = isOpen ? 'Hide' : 'View';
+      });
+    });
+
+    // Click message bubble to expand/collapse full content
+    document.querySelectorAll('.msg-bubble').forEach(bubble => {
+      bubble.addEventListener('click', () => bubble.classList.toggle('expanded'));
+    });
+
+    // Click tool call header to expand/collapse args
+    document.querySelectorAll('.tool-call-header').forEach(header => {
+      header.addEventListener('click', () => {
+        const args = header.nextElementSibling;
+        args.classList.toggle('collapsed');
+        header.querySelector('.tc-arrow').textContent = args.classList.contains('collapsed') ? '▶' : '▼';
+      });
+    });
   </script>
 </body>
 </html>`;
@@ -544,4 +674,8 @@ function shortModel(model: string): string {
 
 function escHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function formatJson(s: string): string {
+  try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s; }
 }

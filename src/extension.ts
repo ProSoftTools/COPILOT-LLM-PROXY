@@ -64,6 +64,9 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('copilot-llm-proxy.stop', () => { stopServer(); }),
     vscode.commands.registerCommand('copilot-llm-proxy.toggle', () => { server ? stopServer() : bootServer(getConfigPort(), getApiKey()); }),
     vscode.commands.registerCommand('copilot-llm-proxy.metrics', () => showMetricsPanel(extensionContext)),
+    vscode.commands.registerCommand('copilot-llm-proxy.docs', () =>
+      vscode.commands.executeCommand('extension.open', extensionContext.extension.id),
+    ),
     vscode.commands.registerCommand('copilot-llm-proxy.configPort', configurePort),
     vscode.commands.registerCommand('copilot-llm-proxy.configApiKey', configureApiKey),
     vscode.commands.registerCommand('copilot-llm-proxy.toggleAutoStart', toggleAutoStart),
@@ -153,11 +156,35 @@ function bootServer(port: number, apiKey: string) {
 
   markSessionStart();
 
-  server.listen(port, () => {
-    const authStatus = apiKey ? ' (auth enabled)' : '';
-    log('INFO', `Server started on port ${port}${authStatus}`);
-    vscode.window.showInformationMessage(`Copilot LLM Proxy running on http://localhost:${port}${authStatus}`);
+  server.listen(port, async () => {
+    const baseUrl = `http://localhost:${port}/v1`;
+    const authStatus = apiKey ? 'enabled' : 'disabled';
+    log('INFO', `Server started on port ${port} (auth: ${authStatus})`);
     updateStatusBar();
+
+    // Build a richer notification with model count and quick actions
+    let modelCount = 0;
+    try {
+      const models = await vscode.lm.selectChatModels();
+      modelCount = models.length;
+    } catch { /* ignore — model listing failure is non-fatal */ }
+
+    const modelInfo = modelCount > 0 ? ` · ${modelCount} model${modelCount !== 1 ? 's' : ''} available` : '';
+    const message = `Copilot LLM Proxy ready — ${baseUrl} · auth: ${authStatus}${modelInfo}`;
+
+    vscode.window.showInformationMessage(message, 'Copy URL', 'View Models', 'Metrics', 'Docs')
+      .then(choice => {
+        if (choice === 'Copy URL') {
+          vscode.env.clipboard.writeText(baseUrl);
+          vscode.window.showInformationMessage(`Copied: ${baseUrl}`);
+        } else if (choice === 'View Models') {
+          vscode.env.openExternal(vscode.Uri.parse(`${baseUrl}/models`));
+        } else if (choice === 'Metrics') {
+          vscode.commands.executeCommand('copilot-llm-proxy.metrics');
+        } else if (choice === 'Docs') {
+          vscode.commands.executeCommand('copilot-llm-proxy.docs');
+        }
+      });
   });
 }
 
@@ -203,6 +230,7 @@ function updateStatusBar() {
 
     // Actions
     md.appendMarkdown(`[$(dashboard) Metrics](command:copilot-llm-proxy.metrics) &nbsp;&nbsp; `);
+    md.appendMarkdown(`[$(book) Docs](command:copilot-llm-proxy.docs) &nbsp;&nbsp; `);
     md.appendMarkdown(`[$(debug-stop) Stop Server](command:copilot-llm-proxy.stop)`);
 
     updateMetricsBar();
@@ -221,7 +249,8 @@ function updateStatusBar() {
     md.appendMarkdown(`---\n\n`);
 
     // Actions
-    md.appendMarkdown(`[$(play) Start Server](command:copilot-llm-proxy.start)`);
+    md.appendMarkdown(`[$(play) Start Server](command:copilot-llm-proxy.start) &nbsp;&nbsp; `);
+    md.appendMarkdown(`[$(book) Docs](command:copilot-llm-proxy.docs)`);
 
     metricsBarItem.hide();
   }
@@ -321,7 +350,13 @@ function formatModel(m: vscode.LanguageModelChat) {
 async function handleChatCompletions(req: http.IncomingMessage, res: http.ServerResponse) {
   const startTime = Date.now();
   const body = JSON.parse(await readBody(req));
-  const { model: modelId, messages, stream, max_tokens, tools, tool_choice, temperature, top_p } = body;
+  const { model: modelId, messages, stream, max_tokens, tools, tool_choice, temperature, top_p, response_format } = body;
+
+  // Capture a truncated snapshot of the messages for metrics display
+  const requestMessages: Array<{ role: string; content: string }> = (messages || []).map((m: any) => ({
+    role: m.role || 'unknown',
+    content: truncateStr(typeof m.content === 'string' ? m.content : JSON.stringify(m.content), 800),
+  }));
 
   if (!modelId || !messages) {
     sendError(res, 400, 'Missing required fields: model, messages');
@@ -333,6 +368,20 @@ async function handleChatCompletions(req: http.IncomingMessage, res: http.Server
     const available = (await vscode.lm.selectChatModels()).map(m => m.id);
     sendError(res, 404, `Model "${modelId}" not found. Available: ${available.join(', ')}`);
     return;
+  }
+
+  // Handle response_format by injecting a JSON instruction into messages
+  // VS Code LM API doesn't support responseFormat natively
+  if (response_format && response_format.type !== 'text') {
+    let jsonInstruction = 'Respond with valid JSON only. Do not include any text outside the JSON object.';
+    if (response_format.type === 'json_schema' && response_format.json_schema?.schema) {
+      jsonInstruction += `\nYour response must conform to this JSON schema:\n${JSON.stringify(response_format.json_schema.schema)}`;
+    }
+    // Send as both system and user — some models (e.g. gpt-5-mini) ignore system role
+    messages.unshift(
+      { role: 'system', content: jsonInstruction },
+      { role: 'user', content: jsonInstruction },
+    );
   }
 
   const vsMessages = convertMessages(messages);
@@ -371,6 +420,8 @@ async function handleChatCompletions(req: http.IncomingMessage, res: http.Server
   let error: string | undefined;
   let usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
   let hasToolCalls = false;
+  let responseText = '';
+  let toolCallsData: Array<{ name: string; args: string }> = [];
 
   try {
     const response = await model.sendRequest(vsMessages, options, cts.token);
@@ -379,10 +430,14 @@ async function handleChatCompletions(req: http.IncomingMessage, res: http.Server
       const result = await handleStream(res, response, modelId, cts.token);
       usage = result.usage;
       hasToolCalls = result.hasToolCalls;
+      responseText = result.responseText;
+      toolCallsData = result.toolCallsData;
     } else {
       const result = await handleNonStream(res, response, modelId);
       usage = result.usage;
       hasToolCalls = result.hasToolCalls;
+      responseText = result.responseText;
+      toolCallsData = result.toolCallsData;
     }
   } catch (err: any) {
     error = err.message;
@@ -404,6 +459,9 @@ async function handleChatCompletions(req: http.IncomingMessage, res: http.Server
       totalTokens: usage.totalTokens,
       hasToolCalls,
       error,
+      requestMessages,
+      responseText: truncateStr(responseText, 3000),
+      toolCallsData: toolCallsData.map(tc => ({ name: tc.name, args: truncateStr(tc.args, 1000) })),
     });
     updateMetricsBar();
     refreshPanel();
@@ -416,16 +474,42 @@ async function handleChatCompletions(req: http.IncomingMessage, res: http.Server
 // --- Model Resolution ---
 
 async function resolveModel(modelId: string): Promise<vscode.LanguageModelChat | undefined> {
+  // Try as-is: exact id, then family
   let models = await vscode.lm.selectChatModels({ id: modelId });
   if (models.length > 0) { return models[0]; }
 
   models = await vscode.lm.selectChatModels({ family: modelId });
   if (models.length > 0) { return models[0]; }
 
+  // Many clients prefix model names like "openai/gpt-4o" or "copilot/claude-3.5-sonnet".
+  // If a "vendor/name" prefix is present, retry with the bare name, optionally
+  // matching the vendor too.
+  const slashIdx = modelId.indexOf('/');
+  if (slashIdx > 0) {
+    const vendor = modelId.slice(0, slashIdx);
+    const bare = modelId.slice(slashIdx + 1);
+
+    models = await vscode.lm.selectChatModels({ vendor, id: bare });
+    if (models.length > 0) { return models[0]; }
+
+    models = await vscode.lm.selectChatModels({ vendor, family: bare });
+    if (models.length > 0) { return models[0]; }
+
+    models = await vscode.lm.selectChatModels({ id: bare });
+    if (models.length > 0) { return models[0]; }
+
+    models = await vscode.lm.selectChatModels({ family: bare });
+    if (models.length > 0) { return models[0]; }
+  }
+
   return undefined;
 }
 
 // --- Helpers ---
+
+function truncateStr(s: string, maxLen: number): string {
+  return s.length > maxLen ? s.slice(0, maxLen) + '…' : s;
+}
 
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {

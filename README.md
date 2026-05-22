@@ -6,7 +6,7 @@
   A lightweight VS Code extension that bridges GitHub Copilot's Language Model API to an OpenAI-compatible REST API. Zero runtime dependencies.
 
   [![VS Code](https://img.shields.io/badge/VS%20Code-1.93%2B-blue.svg)](https://code.visualstudio.com/)
-  [![Version](https://img.shields.io/badge/version-1.0.0-green.svg)](https://github.com/ProSoftTools/COPILOT-LLM-PROXY)
+  [![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](https://github.com/ProSoftTools/COPILOT-LLM-PROXY)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
   [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](#)
 
@@ -63,6 +63,7 @@ Open via the Command Palette (**Copilot LLM Proxy: View Metrics**) or click the 
 - **Hourly activity** — visual breakdown of requests per hour
 - **Per-model stats** — request count, tokens, avg/p95 latency, error count
 - **Request history** — scrollable table with timestamp, model, type (stream/tools), tokens, latency, status
+- **Request/response inspection** — click **View** on any row to expand an inline panel showing the captured request messages (role-coded, click to expand each) and the response text. Tool calls render as collapsible blocks with the function name and pretty-printed JSON arguments
 - **Date range filtering** — Today, 7 Days, 30 Days, All Time, or custom date range
 - **Clear history** — wipe all stored metrics
 
@@ -181,15 +182,43 @@ curl http://localhost:4141/v1/chat/completions \
   }'
 ```
 
+### Thinking / Reasoning
+
+If the underlying model emits thinking tokens, the proxy surfaces them using the DeepSeek/OpenAI-compatible `reasoning_content` field — alongside (not inside) the normal `content`.
+
+**Non-streaming** — `reasoning_content` is attached to the message:
+
+```json
+{
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": "The answer is 42.",
+      "reasoning_content": "Let me work through this step by step..."
+    }
+  }]
+}
+```
+
+**Streaming** — reasoning arrives in `delta.reasoning_content` chunks, typically before the final `content` chunks:
+
+```
+data: {"choices":[{"delta":{"reasoning_content":"Let me think..."}}]}
+data: {"choices":[{"delta":{"content":"The answer is 42."}}]}
+```
+
+No request-side flag is needed — thinking is forwarded automatically when the selected model produces it. There is currently no passthrough for OpenAI-style `reasoning_effort` or Anthropic-style `thinking.budget_tokens`; whether a model thinks is controlled by the upstream Copilot model itself.
+
 ### Model Resolution
 
 When you specify a model ID in the request, the proxy resolves it in order:
 
 1. Exact match by model `id`
 2. Fallback match by model `family`
-3. Returns available models in the error if not found
+3. If the ID contains a `vendor/` prefix (e.g. `copilot/gpt-4o`, `openai/gpt-4o`), the prefix is stripped and resolution retried — first matching `{ vendor, id }`, then `{ vendor, family }`, then bare `id`, then bare `family`
+4. Returns 404 if not found
 
-Run `GET /v1/models` to see all available model IDs.
+`GET /v1/models` returns models with their bare IDs (the `owned_by` field carries the vendor). In chat completion requests, you may send either the bare ID (`gpt-4o`) or the OpenRouter-style prefixed form (`copilot/gpt-4o`) — both resolve to the same model.
 
 ---
 
@@ -213,6 +242,7 @@ All commands are available from the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift
 | **Copilot LLM Proxy: Start Server** | Start the proxy server |
 | **Copilot LLM Proxy: Stop Server** | Stop the proxy server |
 | **Copilot LLM Proxy: View Metrics** | Open the metrics dashboard |
+| **Copilot LLM Proxy: Open Documentation** | Open the extension's README/docs page inside VS Code |
 | **Copilot LLM Proxy: Configure Port** | Change the server port |
 | **Copilot LLM Proxy: Configure API Key** | Set or clear the authentication key |
 | **Copilot LLM Proxy: Toggle Auto-start** | Enable or disable auto-start on launch |
