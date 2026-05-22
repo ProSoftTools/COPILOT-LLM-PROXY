@@ -23,6 +23,7 @@
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
+  "icon": "assets/icon.png",
   "contributes": {
     "commands": [
       {
