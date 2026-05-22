@@ -46,6 +46,8 @@ import * as http from 'http';
 export interface ResponseResult {
   usage: { promptTokens: number; completionTokens: number; totalTokens: number };
   hasToolCalls: boolean;
+  responseText: string;
+  toolCallsData: Array<{ name: string; args: string }>;
 }
 
 // ============================================================================
@@ -281,6 +283,8 @@ export async function handleStream(
   let hasToolCalls = false;     // Track if any tool calls were emitted
   let toolCallIndex = -1;       // Incrementing index for each tool call
   let completionTokens = 0;     // Estimated token count for usage stats
+  let responseText = '';        // Accumulated response text for metrics
+  const toolCallsData: Array<{ name: string; args: string }> = [];
 
   try {
     for await (const part of response.stream) {
@@ -290,6 +294,7 @@ export async function handleStream(
 
       // --- Text content ---
       if (part instanceof vscode.LanguageModelTextPart) {
+        responseText += part.value;
         completionTokens += estimateTokens(part.value);
         const chunk = {
           id,
@@ -316,6 +321,7 @@ export async function handleStream(
         hasToolCalls = true;
         toolCallIndex++;
         const argsStr = JSON.stringify(part.input);
+        toolCallsData.push({ name: part.name, args: argsStr });
         completionTokens += estimateTokens(argsStr);
         const chunk = {
           id,
@@ -404,6 +410,8 @@ export async function handleStream(
   return {
     usage: { promptTokens: 0, completionTokens, totalTokens: completionTokens },
     hasToolCalls,
+    responseText,
+    toolCallsData,
   };
 }
 
@@ -495,6 +503,8 @@ export async function handleNonStream(
   return {
     usage: { promptTokens: 0, completionTokens, totalTokens: completionTokens },
     hasToolCalls,
+    responseText: fullText,
+    toolCallsData: toolCalls.map(tc => ({ name: tc.function.name, args: tc.function.arguments })),
   };
 }
 

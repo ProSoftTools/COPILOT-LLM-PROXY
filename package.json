@@ -2,7 +2,7 @@
   "name": "copilot-llm-proxy",
   "displayName": "Copilot LLM Proxy",
   "description": "Lightweight proxy that exposes VS Code Language Model API as an OpenAI-compatible REST API",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "MIT",
   "publisher": "CopilotProxy",
   "repository": {
@@ -36,6 +36,10 @@
       {
         "command": "copilot-llm-proxy.metrics",
         "title": "Copilot LLM Proxy: View Metrics"
+      },
+      {
+        "command": "copilot-llm-proxy.docs",
+        "title": "Copilot LLM Proxy: Open Documentation"
       },
       {
         "command": "copilot-llm-proxy.configPort",
