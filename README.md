@@ -6,7 +6,7 @@
   A lightweight VS Code extension that bridges GitHub Copilot's Language Model API to an OpenAI-compatible REST API. Zero runtime dependencies.
 
   [![VS Code](https://img.shields.io/badge/VS%20Code-1.93%2B-blue.svg)](https://code.visualstudio.com/)
-  [![Version](https://img.shields.io/badge/version-1.1.0-green.svg)](https://github.com/ProSoftTools/COPILOT-LLM-PROXY)
+  [![Version](https://img.shields.io/badge/version-1.1.1-green.svg)](https://github.com/ProSoftTools/COPILOT-LLM-PROXY)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
   [![Zero Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](#)
 

@@ -4,6 +4,17 @@ All notable changes to the **Copilot LLM Proxy** extension are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1]
+
+### Fixed
+
+- **LiteLLM compatibility** — assistant messages with `tool_calls` but no `content` field (LiteLLM strips `content: null` during serialization) no longer crash the metrics snapshot. Missing content is coerced to an empty string before truncation.
+
+### Changed
+
+- **Marketplace icon** — added the `icon` field to `package.json` so the extension logo renders on the VS Code Marketplace listing.
+- **Documentation** — README now includes a dedicated *Thinking / Reasoning* section showing the `reasoning_content` shape for both streaming and non-streaming responses.
+
 ## [1.1.0]
 
 ### Added
